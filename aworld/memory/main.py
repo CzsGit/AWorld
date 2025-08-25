@@ -579,30 +579,32 @@ class AworldMemory(Memory):
 
 
     def _save_to_vector_db(self, memory_item: MemoryItem):
-        if not memory_item.embedding_text:
-            logger.debug(f"memory_item.embedding_text is None, skip save to vector store")
-            return
-        if self._vector_db and self._embedder:
-            embedding = self._embedder.embed_query(memory_item.embedding_text)
-            # save to vector store
-            embedding_meta = EmbeddingsMetadata(
-                memory_id=memory_item.id,
-                agent_id = memory_item.agent_id,
-                session_id = memory_item.session_id,
-                task_id = memory_item.task_id,
-                user_id = memory_item.user_id,
-                application_id = memory_item.application_id,
-                memory_type=memory_item.memory_type,
-                created_at=memory_item.created_at,
-                updated_at=memory_item.updated_at,
-                embedding_model=self.config.embedding_config.model_name,
-            )
-            embedding_item= EmbeddingsResult(embedding = embedding, content=memory_item.embedding_text, metadata=embedding_meta)
+        try:
+            if not memory_item.embedding_text:
+                logger.debug(f"memory_item.embedding_text is None, skip save to vector store")
+                return
+            if self._vector_db and self._embedder:
+                embedding = self._embedder.embed_query(memory_item.embedding_text)
+                # save to vector store
+                embedding_meta = EmbeddingsMetadata(
+                    memory_id=memory_item.id,
+                    agent_id = memory_item.agent_id,
+                    session_id = memory_item.session_id,
+                    task_id = memory_item.task_id,
+                    user_id = memory_item.user_id,
+                    application_id = memory_item.application_id,
+                    memory_type=memory_item.memory_type,
+                    created_at=memory_item.created_at,
+                    updated_at=memory_item.updated_at,
+                    embedding_model=self.config.embedding_config.model_name,
+                )
+                embedding_item= EmbeddingsResult(embedding = embedding, content=memory_item.embedding_text, metadata=embedding_meta)
 
-            self._vector_db.insert(self.config.vector_store_config.config['collection_name'], [embedding_item])
-        else:
-            logger.warning(f"memory_store or embedder is None, skip save to vector store")
-
+                self._vector_db.insert(self.config.vector_store_config.config['collection_name'], [embedding_item])
+            else:
+                logger.warning(f"memory_store or embedder is None, skip save to vector store")
+        except Exception as err:
+            logger.warning(f"save_to_vector, failed is {err}")
 
     def update(self, memory_item: MemoryItem):
         self.memory_store.update(memory_item)
@@ -672,14 +674,18 @@ class AworldMemory(Memory):
 
         # if total messages <= requested rounds, return all messages
         if len(result_items) <= last_rounds:
-            return init_items + result_items
+            result_items =  init_items + result_items
         else:
             # Ensure tool message completeness: LLM API requires the preceding tool_calls message 
             # to be included when processing a tool message. If the first message in our window 
             # is a tool message, we need to expand the window to include its associated tool_calls.
             while isinstance(result_items[-last_rounds], MemoryToolMessage):
                 last_rounds = last_rounds + 1
-            return init_items + result_items[-last_rounds:]
+            result_items = init_items + result_items[-last_rounds:]
+
+        result_items.sort(key=lambda x: x.created_at, reverse=False)
+        return result_items
+
 
 
     def search(self, query, limit=100, memory_type="message", threshold=0.8, filters=None) -> Optional[list[MemoryItem]]:
